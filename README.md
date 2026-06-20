@@ -1,18 +1,19 @@
-# Autonomous Quant Trader — RL Environment Architecture
+# Autonomous Quant Analyst-Trader — RL Environment
 
-**Target:** HUD × YC Frontier/RSI Hackathon · Autonomous Business + Agentic Collaboration
-**One-liner:** An autonomous trading *firm* (a small org of agents) that researches, implements, validates, and executes strategies in a **synthetic market calibrated to real data**, trained with RL on a **verifiable, non-reward-hackable** signal.
+**HUD × YC Frontier/RSI Hackathon** · Autonomous Business + Agentic Collaboration
+
+**One-liner:** An autonomous quant *firm* (a small org of agents) that analyzes real SEC filings, proposes and validates strategies, and is trained with RL on a **verifiable, filing-grounded rubric reward** — then provably improves itself, measured on held-out tasks.
 
 ---
 
-## 0. Design principle (read first)
+## 0. Design principles (read first)
 
-Everything below exists to satisfy one constraint: **the reward must measure skill, not market luck, and must not be hackable.** The founders' own number is that ~90% of RL data fails — usually because it hill-climbs while learning the wrong thing. We avoid that by:
+The founders say ~90% of RL data fails — it hill-climbs while learning the wrong thing (reward hacking, contrived tasks). Every choice here defends against that:
 
-1. **Trading a market we generate** → there's a *known optimal*, so PnL becomes a skill measurement.
-2. **Calibrating that market to real data** → realistic dynamics, not a contrived toy.
-3. **Penalizing self-deception** (lookahead/overfitting) and **ruin** → the agent can't game its way to a high score.
-4. **Proving transfer on held-out generators** → a climbing curve that's learning the *right* thing.
+1. **Rubric reward, not a single scalar** — decomposed, weighted, verifiable sub-criteria. You can't game a reward that demands the right number *and* the right cited source *and* the right driver.
+2. **Ground truth from the primary source** — numbers computed from the filing, drivers taken from its MD&A, citations matched to accession numbers. The LLM may *draft* a rubric; the filing is the truth.
+3. **Real data, made verifiable** — real SEC filings (EDGAR/XBRL) + Exa, graded against filing-derived answers. (HUD's own finance example does exactly this.)
+4. **Prove transfer on held-out tasks** — a climbing curve that's learning the *right* thing, not memorizing the taskset.
 
 If a change breaks any of these four, reject it.
 
@@ -23,43 +24,37 @@ If a change breaks any of these four, reject it.
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                        HUD RL ENVIRONMENT                              │
-│                                                                        │
 │  ┌────────────────────────────────────────────────────────────────┐  │
 │  │                   THE FIRM (agent org)                          │  │
-│  │                                                                 │  │
 │  │   ┌───────────────┐                                             │  │
 │  │   │ ORCHESTRATOR  │  (PM / capital allocator — the policy)      │  │
-│  │   │  under test   │                                             │  │
 │  │   └──────┬────────┘                                             │  │
 │  │          │ calls specialists as MCP tools (subagent pattern)    │  │
 │  │   ┌──────┼──────────────┬──────────────────┐                    │  │
 │  │   ▼      ▼              ▼                  ▼                    │  │
-│  │ Research  Risk-Mgr     Executor        (Auditor)               │  │
-│  │ subagent  subagent     subagent        subagent                │  │
+│  │ Research  Risk-Mgr     Executor        Auditor                 │  │
 │  └────────────────────────────────────────────────────────────────┘  │
 │          │ tool calls (@env.tool + connectors)                         │
 │  ┌───────┴────────────────────────────────────────────────────────┐  │
-│  │  TOOLS LAYER                                                    │  │
-│  │  get_market_state · run_backtest · implement_strategy ·         │  │
-│  │  size_position · place_orders · read_features                   │  │
-│  │  connect_openapi → Exa (news) · SixtyFour (fundamentals)        │  │
+│  │  TOOLS: sec_search · read_filing · compute_metric ·             │  │
+│  │  run_backtest · size_position · place_orders                    │  │
+│  │  connect_openapi → Exa (search) · SixtyFour (fundamentals)      │  │
 │  └────────────────────────────────────────────────────────────────┘  │
 │          │                                                             │
-│  ┌───────┴──────────────┐   ┌──────────────────┐   ┌───────────────┐  │
-│  │ SYNTHETIC MARKET     │   │ EXECUTION SIM     │   │ GRADER        │  │
-│  │ generators (DGP)     │──▶│ (costs, slippage, │──▶│ (env-side,    │  │
-│  │ calibrated to real   │   │  fills, no-look)  │   │ tool-filtered)│  │
-│  └──────────────────────┘   └──────────────────┘   └───────────────┘  │
-│          ▲                                                  │          │
-│   real-data calibration slice                        scalar reward     │
+│  ┌───────┴────────────┐   ┌──────────────────────────────────────┐    │
+│  │ RUBRIC GENERATOR   │   │ RUBRIC GRADER (env-side, filtered)    │    │
+│  │ filing → answer key│──▶│ weighted: calc · attribution ·        │    │
+│  │ + weighted criteria│   │ citations · strategy → scalar reward  │    │
+│  └────────────────────┘   └──────────────────────────────────────┘    │
+│          ▲                                          │                  │
+│   SEC EDGAR / XBRL + MD&A                     dense reward             │
 └──────────────────────────────────────────────────────────────────────┘
-            │                                                  │
-   ┌────────┴─────────┐                            ┌───────────┴────────┐
-   │ EXTERNAL MEMORY  │                            │  RL TRAINING LOOP  │
-   │ (playbook store; │                            │  GRPO via Fireworks│
-   │  read pre-run,   │                            │  / HUD on-policy   │
-   │  write post-grade)│                           │  + held-out eval   │
-   └──────────────────┘                            └────────────────────┘
+            │                                          │
+   ┌────────┴─────────┐                    ┌───────────┴────────┐
+   │ EXTERNAL MEMORY  │                    │  RL TRAINING       │
+   │ (self-authored   │                    │  GRPO / RFT-lite   │
+   │  playbook)       │                    │  + held-out eval   │
+   └──────────────────┘                    └────────────────────┘
 ```
 
 ---
@@ -67,129 +62,115 @@ If a change breaks any of these four, reject it.
 ## 2. The agent loop (one episode)
 
 ```
- ┌─────────────┐
- │ 1. OBSERVE  │  get_market_state() → prices, features, regime
- └──────┬──────┘
-        ▼
- ┌─────────────┐
- │ 2.HYPOTHESIZE│ Research subagent proposes a signal/strategy
- └──────┬──────┘  (optionally enriched via Exa / SixtyFour)
-        ▼
- ┌─────────────┐
- │ 3.IMPLEMENT │  implement_strategy() → params / code
- └──────┬──────┘
-        ▼
- ┌─────────────┐
- │ 4. VALIDATE │  run_backtest() in-sample; Auditor checks for
- └──────┬──────┘  lookahead / overfit  (feeds self-deception term)
-        ▼
- ┌─────────────┐
- │ 5. EXECUTE  │  Risk-Mgr sizes positions; Executor places orders
- └──────┬──────┘  in the execution sim (costs + slippage applied)
-        ▼
- ┌─────────────┐
- │ 6. SCORE    │  grader runs on HELD-OUT episode from same DGP
- └──────┬──────┘  → scalar reward
-        ▼
- ┌─────────────┐
- │ 7. IMPROVE  │  (a) weights via GRPO on high-reward trajectories
- └─────────────┘  (b) playbook append to external memory
+1. OBSERVE     sec_search / read_filing → pull the relevant 10-K / 10-Q
+2. ANALYZE     compute_metric → margins, YoY deltas, ratios
+3. ATTRIBUTE   Research subagent names the drivers (cross-checks MD&A)
+4. STRATEGIZE  propose optimization levers / positioning
+5. VALIDATE    Auditor checks for unsupported claims / bad citations
+6. ANSWER      structured output (numbers + citations + drivers + levers)
+7. SCORE       rubric grader runs on a HELD-OUT filing → scalar reward
+8. IMPROVE     (a) GRPO/RFT on high-reward trajectories
+               (b) playbook append to external memory
 ```
 
-Single-turn per task for trainability; the "org" is realized via subagent tool calls inside the turn, not multi-turn chat.
+Single-turn for trainability; the "org" lives in subagent tool calls inside the turn.
 
 ---
 
-## 3. The reward function (the heart)
+## 3. The reward: a HUD-style weighted rubric
+
+Modeled on HUD's own finance example. The reward is a sum of weighted, verifiable criteria:
 
 ```
-reward =  w1 * edge_capture          # fraction of recoverable edge captured
-        - w2 * self_deception        # lookahead / overfit / failed-ablation penalty
-        - w3 * ruin                  # max-drawdown / blow-up penalty (business survival)
-        - w4 * cost_violation        # ignoring transaction costs / over-leverage
+reward = Σ wᵢ · criterionᵢ        (normalized to [0,1])
 ```
 
-**edge_capture** = realized risk-adjusted return (Sharpe/Sortino, cost-adjusted) ÷ the *theoretical max* return achievable in that generated market (known, because we own the DGP). Range-normalized to [0,1].
-
-**self_deception** = penalty if the agent's own backtest used future data, if the strategy fails an out-of-sample ablation the env runs, or if reported in-sample Sharpe diverges from held-out Sharpe beyond a threshold. *This is the differentiator — the agent is scored on not fooling itself.*
-
-**ruin** = penalty scaling with max drawdown; a blow-up (equity < ruin threshold) → reward floored at 0 regardless of peak PnL. Encodes "a business that goes bankrupt scores zero."
-
-**Tuning to the 20–50% band:** dial signal-to-noise of the generator (signal strength vs. injected noise) and transaction costs until baseline models capture 20–50% of recoverable edge with real variance. Run each task ≥10× to confirm the band before committing.
-
-**Anti-reward-hacking checklist (must all hold):**
-- transaction costs + slippage applied on every fill
-- hard position-size / leverage caps
-- execution sim never reveals future bars (no-lookahead harness)
-- grader is env-side and tool-filtered (agent cannot call it)
-- ablation run proves the strategy isn't exploiting a sim artifact
-
----
-
-## 4. Data layer
-
-### Primary: synthetic generators (DGP), calibrated to real
-| Generator | Models | Recoverable edge |
+| Section | Example criterion | How it's checked |
 |---|---|---|
-| Ornstein–Uhlenbeck | mean reversion | revert to known mean |
-| GBM + regime switch (HMM) | trend / regime change | follow regime |
-| Cointegrated pairs | stat-arb | trade the spread |
-| Hawkes process | order-flow clustering | microstructure timing |
+| **Calculation Accuracy** | "FY2022 gross margin = $X.XX (±$0.02)" | numeric tolerance vs. filing-computed value |
+| **Attribution Analysis** | "Names higher input costs as the primary margin driver" | required entities present, cross-checked vs. MD&A |
+| **Source Citations** | "Cites the FY2022 10-K (accession #…)" | accession-number / string match |
+| **Strategy** | "Lists ≥5 specific optimization levers" | count + match vs. expert lever list (or synthetic optimum) |
 
-**Calibration:** fit generator parameters (drift, vol, mean-reversion speed, regime transition probs) to a **frozen real-market slice** so dynamics look real while ground truth stays known. This is what keeps it out of the "contrived/toy" bucket the founders distrust.
+**Why a rubric also trains better:** partial credit across criteria gives a **dense, shaped reward** (not sparse 0/1) — smoother gradient, easier to land in the 20–50% band.
 
-### Real-data sources (for calibration + optional realism layer)
-- **Free history:** yfinance, Stooq, Alpha Vantage (free key); LOBSTER samples for intraday/LOB.
-- **Sponsors:** Protege (real-world training datasets — *ask them*), Exa (news/context tool), SixtyFour (fundamentals tool).
-- Real data is for **calibration and flavor only** — never the core reward (it reintroduces luck/leakage).
+**Anti-reward-hacking (must hold):**
+- every numeric criterion grounded in a filing-derived value
+- attribution grounded in the MD&A, not the grader's opinion
+- grader is env-side and tool-filtered (agent can't call it)
+- run HUD **QA Agents** to scan for false positives / reward hacking before training
 
 ---
 
-## 5. HUD integration (env.py skeleton)
+## 4. The rubric generator (highest-leverage component)
+
+Build this once; it manufactures your whole taskset.
+
+```
+filing (10-K/10-Q)                     →  parse (XBRL + text)
+   ├─ compute numbers (rev, COGS, margins, YoY)  → Calculation criteria (auto)
+   ├─ scrape MD&A drivers                         → Attribution criteria
+   ├─ capture accession #                         → Citation criteria
+   └─ LLM drafts strategy levers → human verify    → Strategy criteria
+                          │
+                          ▼
+            weighted rubric  →  HUD native grader
+```
+
+**Discipline:** LLM drafts, primary source is truth. Verify every criterion against the filing (recompute numbers, confirm drivers in MD&A) before it counts.
+
+---
+
+## 5. Data layer
+
+| Source | Role |
+|---|---|
+| **SEC EDGAR** (10-K/10-Q, full-text search) | base filings — agent tool + rubric ground truth |
+| **SEC XBRL financial-statement datasets** | machine-readable values → auto-generate numeric rubrics at scale |
+| **MD&A sections** | management's stated drivers → attribution ground truth |
+| **Exa** (sponsor) | live search/news as an agent tool |
+| **SixtyFour** (sponsor) | fundamentals enrichment as an agent tool |
+| **Protege** (sponsor) | richer real-world datasets — ask the team |
+| *Synthetic market (optional)* | known-optimal ground truth for the strategy layer only |
+
+Real filings are both the agent's search target *and* (parsed) the answer key — same document, two roles.
+
+---
+
+## 6. HUD integration (env.py skeleton)
 
 ```python
 from hud import Environment
-from hud.capabilities import Capability
 
 env = Environment("autonomous-quant-firm")
 
-# --- agent-callable tools ---
 @env.tool()
-def get_market_state(episode_id: str) -> dict: ...
+def sec_search(query: str) -> list: ...
 @env.tool()
-def run_backtest(strategy: dict, split: str = "in_sample") -> dict: ...
+def read_filing(accession: str, section: str = "all") -> str: ...
 @env.tool()
-def implement_strategy(spec: dict) -> dict: ...
+def compute_metric(filing: str, metric: str) -> float: ...
 @env.tool()
-def size_position(signal: dict, risk_budget: float) -> dict: ...
+def run_backtest(strategy: dict) -> dict: ...
+
+env.connect_openapi("https://api.exa.ai/openapi.json")
+env.connect_openapi("https://api.sixtyfour.ai/openapi.json")
+
+# env-side rubric grader (hidden from the agent)
 @env.tool()
-def place_orders(orders: list) -> dict: ...
+def _grade_rubric(answer: dict, rubric: dict) -> float: ...
 
-# --- sponsor tools via connectors ---
-env.connect_openapi("https://api.exa.ai/openapi.json")        # news/context
-env.connect_openapi("https://api.sixtyfour.ai/openapi.json")  # fundamentals
+@env.scenario("analyze_filing", exclude_tools=["_grade_*"])
+async def analyze_filing(ticker: str, difficulty: int):
+    rubric = load_rubric(ticker, difficulty)        # from generator
+    answer = yield build_prompt(ticker, rubric)     # PROMPT
+    yield await _grade_rubric(answer, rubric)        # REWARD (weighted)
 
-# --- specialist subagents exposed as MCP tools ---
-env = env  # research_subagent / risk_subagent / auditor_subagent
-            # registered via FastMCP + Capability.mcp(...)
-
-# --- env-side GRADER (hidden from agent) ---
-@env.tool()                       # excluded via scenario filtering
-def _grade_held_out(strategy: dict) -> float: ...
-
-@env.scenario("trade_episode", exclude_tools=["_grade_*"])
-async def trade_episode(generator: str, difficulty: int):
-    answer = yield build_prompt(generator, difficulty)   # PROMPT
-    reward = await score(answer,                          # REWARD
-                         edge_capture=..., self_deception=...,
-                         ruin=..., cost_violation=...)
-    yield reward
-
-# difficulty spread → trainable band
-tasks = [trade_episode(generator="ou", difficulty=d) for d in range(1, 6)]
+tasks = [analyze_filing(ticker=t, difficulty=d)
+         for t in TICKERS for d in range(1, 4)]
 ```
 
-Plug the trained checkpoint back in for the baseline→trained comparison:
+Swap the trained checkpoint in for the baseline→trained comparison:
 ```python
 from hud.agents import OpenAIChatAgent
 trained = OpenAIChatAgent(base_url="<fireworks-or-hud-checkpoint>", model="...")
@@ -197,66 +178,67 @@ trained = OpenAIChatAgent(base_url="<fireworks-or-hud-checkpoint>", model="...")
 
 ---
 
-## 6. Training & evaluation loop
+## 7. Model training routes
 
-```
-1. BASELINE     run taskset across Claude / GPT / Gemini / MiniMax (HUD gateway)
-                → leaderboard, confirm 20–50% band + headroom
-2. ROLL OUT     taskset.run(agent, group=8, max_concurrent=10)   # GRPO groups
-3. TRAIN        GRPO on high-reward trajectories (Fireworks cookbook / HUD on-policy)
-4. TRANSFER     re-eval trained checkpoint on HELD-OUT generators (never trained on)
-5. SHOW         the edge-capture curve climbing on held-out  ← the money demo
-```
+The rubric is a **verifiable reward**, so this is RLVR — no separate reward model to train.
 
-**Deadline gate:** first training run live by **8 AM Sunday**. If the curve climbs but an ablation shows it's gaming the sim, that's a *fail* (the 90% trap) — fix the reward, don't ship the curve.
+| Route | What it is | 24h risk | Use when |
+|---|---|---|---|
+| **Rejection-sampling SFT** (expert iteration) | sample N rollouts, keep high-rubric traces, SFT on them | low ✅ | **do this first — guaranteed climb** |
+| **GRPO on-policy** (HUD `hud rl` / Fireworks) | roll out taskset in GRPO groups, train on trajectories | medium | the strongest RSI claim, if time allows |
+| **DPO from rubric pairs** | rank rollouts by rubric → preference pairs → DPO | medium | no reward model; smoother than GRPO |
+| **In-context / playbook** | self-authored memory, no weight change | low | complement / lighter RSI story |
 
----
-
-## 7. What to reuse vs. build
-
-| Reuse (don't rebuild) | Source |
-|---|---|
-| Backtest engine, strategy registry | AgentQuant `src/backtest`, `src/strategies` (check license first) |
-| Market simulator | ABIDES / FinRL / gym-anytrading |
-| Env + eval + training + gateway | HUD SDK |
-| GRPO training | Fireworks cookbook / HUD on-policy |
-| News / fundamentals tools | Exa / SixtyFour via `connect_openapi` |
-
-**Build yourself:** the synthetic generators + calibration, the reward function (esp. self-deception + ruin terms), the no-lookahead execution harness, the held-out transfer eval.
+Notes:
+- **Trained model = an open model** (Fireworks-finetunable, e.g. small Qwen/Llama). The **baseline leaderboard** uses closed frontier models (Claude/GPT/Gemini) via the HUD gateway — you can't fine-tune those.
+- HUD guidance: ~10 runs/task, tune to the **20–50% band**, training run live by **8 AM Sunday**; GRPO group repeats share a group.
+- **Recommended plan:** rejection-sampling SFT as the safe win, then attempt GRPO as the stretch. Both end in the same money shot — a **held-out transfer curve climbing**.
 
 ---
 
-## 8. v1 scope (perfect ONE task first)
+## 8. Training & evaluation loop
+
+```
+1. BASELINE   run taskset across Claude/GPT/Gemini/MiniMax → leaderboard, confirm band
+2. ROLL OUT   group rollouts on the open model (group≥8)
+3. TRAIN      rejection-sampling SFT (then GRPO if time)
+4. TRANSFER   re-eval trained model on HELD-OUT filings (never trained on)
+5. SHOW       the rubric-score curve climbing on held-out  ← the demo
+```
+
+If the curve climbs but QA shows reward hacking → that's a fail (the 90% trap). Fix the rubric, don't ship the curve.
+
+---
+
+## 9. v1 scope (perfect ONE task first)
 
 > Founders' guidance: build one excellent task, then extrapolate.
 
-**v1 task:** OU mean-reversion, single synthetic asset, calibrated to a real pair's mean-reversion stats.
-- Tools: `get_market_state`, `implement_strategy`, `run_backtest`, `size_position`, `place_orders`
-- Reward: edge_capture − self_deception − ruin, with costs + position cap
-- Held-out: fresh OU draws with the same parameters
-- Prove: baseline ~20–50%, trained climbs on held-out, ablation shows real skill
+**v1:** one company, one 10-K, a margin-analysis task.
+- Tools: `sec_search`, `read_filing`, `compute_metric`
+- Rubric: calc accuracy (±tol) + attribution (MD&A) + citation (accession)
+- Held-out: a different company's filing, same rubric shape
+- Prove: baseline ~20–50%, rejection-sampling SFT climbs on held-out, QA shows no hacking
 
-Only after v1 is immaculate: add regime-switch + cointegrated-pairs generators, then the full research/risk/executor org.
+Then extrapolate: more tickers, the strategy section, the firm-as-org, GRPO.
 
 ---
 
-## 9. Module structure
+## 10. Module structure
 
 ```
 quant-firm/
-├── env.py                  # HUD Environment, tools, scenario, grader
-├── generators/             # synthetic DGPs + real-data calibration
-│   ├── ou.py  regime.py  pairs.py  hawkes.py  calibrate.py
-├── sim/                    # execution sim: fills, costs, slippage, no-lookahead
-├── strategies/             # reference implementations (from AgentQuant)
-├── backtest/               # vectorized engine (from AgentQuant)
-├── reward/                 # edge_capture, self_deception, ruin, cost terms
-├── subagents/              # research / risk / executor / auditor (FastMCP)
-├── memory/                 # external playbook store (read pre-run, write post-grade)
-├── tasks.py                # difficulty-parameterized taskset
-└── train/                  # GRPO rollout + held-out transfer eval
+├── env.py                 # HUD Environment, tools, scenario, grader
+├── rubric/                # generator + native graders
+│   ├── generate.py  graders.py  verify.py
+├── data/                  # EDGAR/XBRL fetch + MD&A parse
+├── strategies/ backtest/  # reusable (from AgentQuant; check license)
+├── subagents/             # research / risk / executor / auditor (FastMCP)
+├── memory/                # external playbook store
+├── tasks.py               # difficulty-parameterized taskset
+└── train/                 # rejection-sampling SFT / GRPO + held-out eval
 ```
 
 ---
 
-*Reward measures skill, not luck. The market is one we own. The business has a number for a soul.*
+*Reward measures verifiable skill against the primary source. The rubric is the environment.*
