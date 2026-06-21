@@ -241,4 +241,37 @@ quant-firm/
 
 ---
 
+## 11. Sponsors & how each is used
+
+Every integration is on the critical path — the agent or the pipeline genuinely needs it, not a logo bolted on.
+
+**Core (the build can't run without these):**
+| Sponsor | How we use it |
+|---|---|
+| **HUD** | The RL environment, eval, traces, leaderboard, and on-policy training (`hud rl`). |
+| **Exa** | The agent's web-research tool — finds filings and surrounding context (search + content retrieval), scoped to discovery only. |
+| **Fireworks AI** | Fine-tunes the open model (rejection-sampling SFT / GRPO) and serves the checkpoint we eval against. The self-improvement proof. |
+| **SixtyFour** | Company/fundamentals enrichment tool — the agent researches the entity before analyzing it. |
+| **Anthropic (Claude)** | Baseline leaderboard model, agent policy, and our coding assistant. |
+
+**Baseline leaderboard (run as evals through the HUD gateway):**
+| Sponsor | How we use it |
+|---|---|
+| **OpenAI (GPT)** | Baseline model in the cross-model leaderboard. |
+| **Google DeepMind (Gemini)** | Baseline model; GCP credits for compute. |
+| **MiniMax** | Baseline model; optional voice/video narration of the demo (Most Viral). |
+
+**Infrastructure & data (pick what we need):**
+| Sponsor | How we use it |
+|---|---|
+| **Modal** *or* **Daytona** | Training compute / sandboxed execution of the agent's code; Daytona snapshot-forking for multi-rollout episodes. |
+| **Protege** | Real-world financial datasets for filings + synthetic-market calibration. |
+| **Hillclimb** | Our generated traces + self-authored playbook framed as an RSI training dataset. |
+
+**Intentionally not used:** Antim Labs (robotics sim) and ARC Prize (gaming) — out of scope for a finance environment. We don't bolt on integrations we don't need.
+
+> Sponsor breadth wins *special categories*; the verifiable rubric + finished training loop + held-out transfer curve wins *1st*. Breadth here is a byproduct of a coherent build, not the goal.
+
+---
+
 *Reward measures verifiable skill against the primary source. The rubric is the environment.*
